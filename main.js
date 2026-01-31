@@ -12,18 +12,18 @@ const adminRoutes = require("./routes/admin.routes");
 dotenv.config();
 
 const app = express();
-
-// 🛡️ ADVANCED CORS CONFIGURATION
 const corsOptions = {
   origin: [
-    "https://cbt-system-for-bug-hunt-frontend.vercel.app", // Aapka Vercel URL
-    "http://localhost:5173", // Local testing ke liye (Vite default)
+    "https://cbt-system-for-bug-hunt-frontend.vercel.app", // Main domain
+    "https://cbt-system-for-bug-hunt-frontend-exp11ds82.vercel.app", // Current deployment URL from screenshot
+    "http://localhost:5173"
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "x-admin-key"], // Admin key header allow karna zaroori hai
-  credentials: true, // Agar cookies use kar rahe ho toh
+  allowedHeaders: ["Content-Type", "Authorization", "x-admin-key"],
+  credentials: true,
 };
 
+app.use(cors(corsOptions));
 app.use(cors(corsOptions));
 app.use(express.json());
 
