@@ -27,9 +27,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// 🚀 MIDDLEWARE FOR PRE-FLIGHT REQUESTS
-// Kuch browsers POST se pehle OPTIONS request bhejte hain, ye usko handle karega
-app.options("*", cors(corsOptions));
+
 
 // test route
 app.get("/ping", (req, res) => {
