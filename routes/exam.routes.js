@@ -13,5 +13,6 @@ router.post("/submit", ctrl.submitExam);
 router.post("/start", adminAuth, ctrl.startExam);
 router.post("/end", adminAuth, ctrl.endExam);
 router.post("/reset", adminAuth, ctrl.resetEvent);
+router.post("/update-tab-count", ctrl.updateTabCount);
 
 module.exports = router;

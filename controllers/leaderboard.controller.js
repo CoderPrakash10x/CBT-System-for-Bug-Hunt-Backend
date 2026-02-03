@@ -5,21 +5,27 @@ exports.getLeaderboard = async (req, res) => {
     const leaderboard = await Submission.find({ isSubmitted: true })
       .populate("user", "name email college")
       .sort({
-        isDisqualified: 1, // Qualified first
-        score: -1,         // Higher score
-        timeTaken: 1,      // Less time
+        isDisqualified: 1, // false (0) pehle, true (1) baad mein
+        score: -1,         // Fir high score
+        timeTaken: 1,      // Fir kam time
       });
 
     const result = leaderboard
-      .filter(item => item.user) // Safety check
-      .map((item, index) => ({
-        rank: index + 1,
-        name: item.user.name,
-        college: item.user.college,
-        score: item.score,
-        timeTaken: item.timeTaken,
-        isDisqualified: item.isDisqualified
-      }));
+      .filter(item => item.user)
+      .map((item, index) => {
+        // Agar disqualified hai toh rank "DQ" hogi
+        const displayRank = item.isDisqualified ? "DQ" : index + 1;
+        
+        return {
+          rank: displayRank,
+          name: item.user.name,
+          college: item.user.college,
+          score: item.score,
+          timeTaken: item.timeTaken,
+          isDisqualified: item.isDisqualified,
+          reason: item.disqualificationReason
+        };
+      });
 
     res.json({ success: true, leaderboard: result });
   } catch (err) {

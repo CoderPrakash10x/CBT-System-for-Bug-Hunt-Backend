@@ -43,9 +43,17 @@ const submissionSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    tabSwitchCount: {
+      type: Number,
+      default: 0,
+    },
     isDisqualified: {
       type: Boolean,
       default: false,
+    },
+    disqualificationReason: {
+      type: String,
+      default: "", // e.g., "Tab Switch Limit Exceeded" or "DevTools Detected"
     },
     timeTaken: {
       type: Number, // Seconds mein store hoga
