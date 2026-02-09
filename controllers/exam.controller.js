@@ -6,7 +6,7 @@ const Question = require("../models/Question");
 const getOrCreateExam = async () => {
   let exam = await Exam.findOne();
   if (!exam) {
-    exam = await Exam.create({ status: "waiting", duration: 60 });
+    exam = await Exam.create({ status: "waiting", duration:10 });
   }
   return exam;
 };
