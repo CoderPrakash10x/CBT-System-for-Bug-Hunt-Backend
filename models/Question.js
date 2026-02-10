@@ -1,30 +1,88 @@
 const mongoose = require("mongoose");
 
+/* ================= LANGUAGE BLOCK ================= */
+const languageBlockSchema = new mongoose.Schema(
+  {
+    buggyCode: {
+      type: String,
+      required: true,
+    },
+
+    // 🔒 Hidden test cases (Judge0 ke liye)
+    testCases: [
+      {
+        input: {
+          type: String,
+          required: true,
+        },
+        output: {
+          type: String,
+          required: true,
+        },
+      },
+    ],
+  },
+  { _id: false }
+);
+
+/* ================= QUESTION SCHEMA ================= */
 const questionSchema = new mongoose.Schema(
   {
-    text: {
+    // 🔖 Question Code (PDF style: J1 / P2 / C3)
+    questionCode: {
       type: String,
       required: true,
+      trim: true,
     },
 
-    options: {
+    // 🧠 Problem Statement (common for all languages)
+    problemStatement: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    // 📏 Constraints (PDF format)
+    constraints: {
       type: [String],
-      required: true,
-      validate: v => v.length === 4,
+      default: [],
     },
 
-    correctIndex: {
-      type: Number,
-      required: true,
-      min: 0,
-      max: 3,
+    // 📘 Examples (Input / Output)
+    examples: {
+      type: [
+        {
+          input: { type: String },
+          output: { type: String },
+        },
+      ],
+      default: [],
     },
 
-    explanation: {
+    // 🔥 Question Set (Year based)
+    questionSet: {
       type: String,
-      default: "",
+      enum: ["A", "B"],
+      required: true,
     },
 
+    // 💻 Language-wise buggy code + testcases
+    languages: {
+      python: {
+        type: languageBlockSchema,
+        required: false,
+      },
+      java: {
+        type: languageBlockSchema,
+        required: false,
+      },
+      c: {
+        type: languageBlockSchema,
+        required: false,
+      },
+    },
+
+    // 🔧 Admin control
     isActive: {
       type: Boolean,
       default: true,

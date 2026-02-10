@@ -1,18 +1,31 @@
 const express = require("express");
 const router = express.Router();
-const ctrl = require("../controllers/exam.controller");
+
+const examCtrl = require("../controllers/exam.controller");
+const { submitCode } = require("../controllers/code.controller");
 const adminAuth = require("../middlewares/adminAuth");
 
-// USER
-router.get("/", ctrl.getExam);
-router.post("/join", ctrl.joinExam);
-router.post("/answer", ctrl.saveAnswer);
-router.post("/submit", ctrl.submitExam);
+// ================== USER ROUTES ==================
 
-// ADMIN
-router.post("/start", adminAuth, ctrl.startExam);
-router.post("/end", adminAuth, ctrl.endExam);
-router.post("/reset", adminAuth, ctrl.resetEvent);
-router.post("/update-tab-count", ctrl.updateTabCount);
+// Get exam status
+router.get("/", examCtrl.getExam);
+
+// Join exam (creates submission)
+router.post("/join", examCtrl.joinExam);
+
+// Submit code for a question
+router.post("/submit-code", submitCode);
+
+// Manually submit exam
+router.post("/submit", examCtrl.submitExam);
+
+// Update tab switch count
+router.post("/update-tab-count", examCtrl.updateTabCount);
+
+// ================== ADMIN ROUTES ==================
+
+router.post("/start", adminAuth, examCtrl.startExam);
+router.post("/end", adminAuth, examCtrl.endExam);
+router.post("/reset", adminAuth, examCtrl.resetEvent);
 
 module.exports = router;

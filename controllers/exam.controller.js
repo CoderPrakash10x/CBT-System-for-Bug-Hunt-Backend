@@ -1,17 +1,18 @@
-const mongoose = require("mongoose");
 const Exam = require("../models/Exam");
 const Submission = require("../models/Submission");
-const Question = require("../models/Question");
 
+// ================== GET OR CREATE EXAM ==================
 const getOrCreateExam = async () => {
   let exam = await Exam.findOne();
   if (!exam) {
-    exam = await Exam.create({ status: "waiting", duration:10 });
+    exam = await Exam.create({
+      status: "waiting",
+      duration: 10, // minutes
+    });
   }
   return exam;
 };
 
-// ================== GET EXAM ==================
 exports.getExam = async (req, res) => {
   try {
     const exam = await getOrCreateExam();
@@ -25,9 +26,7 @@ exports.getExam = async (req, res) => {
 exports.startExam = async (req, res) => {
   try {
     const exam = await getOrCreateExam();
-    if (exam.status === "live") {
-      return res.status(400).json({ message: "Already live" });
-    }
+    if (exam.status === "live") return res.status(400).json({ message: "Exam already live" });
 
     const now = new Date();
     exam.status = "live";
@@ -41,7 +40,7 @@ exports.startExam = async (req, res) => {
   }
 };
 
-// ================== END EXAM (🔥 FIXED) ==================
+// ================== END EXAM (FIXED BULK UPDATE) ==================
 exports.endExam = async (req, res) => {
   try {
     const exam = await getOrCreateExam();
@@ -49,34 +48,21 @@ exports.endExam = async (req, res) => {
     exam.endTime = new Date();
     await exam.save();
 
-    const questions = await Question.find({ isActive: true });
-    const submissions = await Submission.find({ isSubmitted: false });
-
-    for (const sub of submissions) {
-      let score = 0;
-
-      if (!sub.isDisqualified) {
-        sub.answers.forEach((ans) => {
-          const q = questions.find(
-            (qq) => qq._id.toString() === ans.questionId.toString()
-          );
-          if (q && q.correctIndex === ans.selectedOption) score++;
-        });
+    // 🔥 FASTER: Un-submitted exams ko batch mein band karo
+    // Note: Score aur timeTaken calculations hum final leaderboard fetch pe bhi handle kar sakte hain 
+    // agar yahan complex calculations se bachna hai.
+    await Submission.updateMany(
+      { isSubmitted: false },
+      { 
+        $set: { 
+          isSubmitted: true, 
+          submittedAt: new Date() 
+        } 
       }
-
-      sub.score = sub.isDisqualified ? 0 : score;
-      sub.isSubmitted = true;
-      sub.submittedAt = new Date();
-      sub.timeTaken = Math.floor(
-        (sub.submittedAt - sub.startedAt) / 1000
-      );
-
-      await sub.save();
-    }
+    );
 
     res.json({ success: true });
-  } catch (e) {
-    console.error(e);
+  } catch (err) {
     res.status(500).json({ success: false });
   }
 };
@@ -88,26 +74,21 @@ exports.joinExam = async (req, res) => {
     const exam = await getOrCreateExam();
 
     if (exam.status !== "live") {
-      return res.status(400).json({ success: false, message: "Not live" });
+      return res.status(400).json({ success: false, message: "Exam not live" });
     }
 
     const now = new Date();
-    const remainingSeconds = Math.max(
-      Math.floor((exam.endTime - now) / 1000),
-      0
-    );
+    const remainingSeconds = Math.max(Math.floor((exam.endTime - now) / 1000), 0);
 
-    let submission = await Submission.findOne({
-      user: userId,
-      exam: exam._id,
-    });
+    // Lean for performance
+    let submission = await Submission.findOne({ user: userId, exam: exam._id });
 
     if (!submission) {
       submission = await Submission.create({
         user: userId,
         exam: exam._id,
         startedAt: now,
-        answers: [],
+        submissions: [],
       });
     }
 
@@ -121,114 +102,57 @@ exports.joinExam = async (req, res) => {
   }
 };
 
-// ================== TAB COUNT ==================
+// ================== TAB SWITCH (OPTIMIZED) ==================
 exports.updateTabCount = async (req, res) => {
   try {
     const { userId } = req.body;
+    
+    // Direct update to DB to avoid race conditions
+    const submission = await Submission.findOneAndUpdate(
+      { user: userId, isSubmitted: false },
+      { $inc: { tabSwitchCount: 1 } },
+      { new: true }
+    );
 
-    const submission = await Submission.findOne({
-      user: userId,
-      isSubmitted: false,
-    });
+    if (!submission) return res.status(404).json({ message: "No active submission" });
 
-    if (!submission) {
-      return res.status(404).json({ message: "No active submission" });
-    }
-
-    submission.tabSwitchCount += 1;
-
-    if (submission.tabSwitchCount >= 2) {
+    // DQ Logic: 3 switches allow karte hain, 4th pe DQ (Thoda linear rakhte hain)
+    if (submission.tabSwitchCount >= 4 && !submission.isDisqualified) {
       submission.isDisqualified = true;
-      submission.disqualificationReason = "Tab Switch Detected";
+      submission.disqualificationReason = "Excessive Tab Switching";
+      await submission.save();
     }
-
-    await submission.save();
 
     res.json({
       success: true,
-      tabCount: submission.tabSwitchCount,   // ✅ THIS LINE FIXES IT
+      tabCount: submission.tabSwitchCount,
       isDisqualified: submission.isDisqualified,
     });
-  } catch (err) {
-    res.status(500).json({ success: false });
-  }
-};
-
-// ================== SAVE ANSWER ==================
-exports.saveAnswer = async (req, res) => {
-  try {
-    const { userId, questionId, selectedOption } = req.body;
-
-    const submission = await Submission.findOne({
-      user: userId,
-      isSubmitted: false,
-    });
-
-    if (!submission || submission.isDisqualified) {
-      return res.status(403).json({ message: "Forbidden" });
-    }
-
-    const idx = submission.answers.findIndex(
-      (a) => a.questionId.toString() === questionId.toString()
-    );
-
-    if (idx > -1) {
-      submission.answers[idx].selectedOption = selectedOption;
-    } else {
-      submission.answers.push({ questionId, selectedOption });
-    }
-
-    await submission.save();
-    res.json({ success: true });
   } catch {
     res.status(500).json({ success: false });
   }
 };
 
-// ================== SUBMIT EXAM ==================
+// ================== SUBMIT EXAM (MANUAL) ==================
 exports.submitExam = async (req, res) => {
   try {
-    const { userId, disqualified, reason } = req.body;
-
-    const submission = await Submission.findOne({
-      user: userId,
-      isSubmitted: false,
-    });
+    const { userId } = req.body;
+    const submission = await Submission.findOne({ user: userId, isSubmitted: false });
 
     if (!submission) return res.json({ success: true });
 
-    const questions = await Question.find({ isActive: true });
-    let score = 0;
-
-    const isDQ = disqualified || submission.isDisqualified;
-
-    if (!isDQ) {
-      submission.answers.forEach((ans) => {
-        const q = questions.find(
-          (qq) => qq._id.toString() === ans.questionId.toString()
-        );
-        if (q && q.correctIndex === ans.selectedOption) score++;
-      });
-    }
-
-    submission.score = isDQ ? 0 : score;
-    submission.isDisqualified = isDQ;
-    submission.disqualificationReason = isDQ
-      ? reason || "Policy Violation"
-      : "";
     submission.isSubmitted = true;
     submission.submittedAt = new Date();
-    submission.timeTaken = Math.floor(
-      (submission.submittedAt - submission.startedAt) / 1000
-    );
+    
+    // Seconds calculation
+    submission.timeTaken = Math.floor((submission.submittedAt - submission.startedAt) / 1000);
+
+    // Score calculation
+    submission.score = submission.isDisqualified ? 0 : 
+      submission.submissions.filter(s => s.verdict === "ACCEPTED").length;
 
     await submission.save();
-
-    res.json({
-      success: true,
-      score: submission.score,
-      isDisqualified: isDQ,
-    });
+    res.json({ success: true, score: submission.score });
   } catch {
     res.status(500).json({ success: false });
   }
@@ -242,7 +166,6 @@ exports.resetEvent = async (req, res) => {
     exam.startTime = null;
     exam.endTime = null;
     await exam.save();
-
     await Submission.deleteMany({});
     res.json({ success: true });
   } catch {
