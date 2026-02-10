@@ -11,8 +11,6 @@ const userSchema = new mongoose.Schema(
     questionSet: { type: String, required: true, enum: ["A", "B"] },
 
     isSubmitted: { type: Boolean, default: false },
-    score: { type: Number, default: 0 },
-    timeTaken: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
