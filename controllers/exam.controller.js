@@ -133,7 +133,7 @@ exports.updateTabCount = async (req, res) => {
   }
 };
 
-// ================== SUBMIT EXAM (MANUAL) ==================
+// ================== SUBMIT EXAM==================
 exports.submitExam = async (req, res) => {
   try {
     const { userId } = req.body;

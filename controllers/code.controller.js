@@ -23,7 +23,7 @@ exports.submitCode = async (req, res) => {
     if (!submission || !user) {
       return res.status(403).json({
         success: false,
-        message: "Submission not allowed",
+        message: "Exam session not active or user not found",
       });
     }
 
@@ -51,12 +51,13 @@ exports.submitCode = async (req, res) => {
     }
 
     // ================= FIND QUESTION ENTRY =================
-    let qSub = submission.submissions.find(
+    // We search within the existing submissions array
+    let qSubIndex = submission.submissions.findIndex(
       (s) => s.questionId.toString() === questionId
     );
 
-    // 🔒 LOCK: already solved
-    if (qSub && qSub.finalVerdict === "ACCEPTED") {
+    // 🔒 LOCK: If already solved, don't re-run (save credits/time)
+    if (qSubIndex !== -1 && submission.submissions[qSubIndex].finalVerdict === "ACCEPTED") {
       return res.json({
         success: true,
         verdict: "ACCEPTED",
@@ -78,14 +79,14 @@ exports.submitCode = async (req, res) => {
 
       const statusId = result.status?.id;
 
-      if (statusId === 3) continue;
+      if (statusId === 3) continue; // 3 is "Accepted" for this specific test case
 
       if (statusId === 6) verdict = "COMPILE_ERROR";
       else if (statusId === 5) verdict = "TIME_LIMIT_EXCEEDED";
       else if (statusId >= 7 && statusId <= 12) verdict = "RUNTIME_ERROR";
       else verdict = "WRONG_ANSWER";
 
-      break;
+      break; // Stop at first failing test case
     }
 
     const attempt = {
@@ -94,34 +95,36 @@ exports.submitCode = async (req, res) => {
       executedAt: new Date(),
     };
 
-    // ================= UPDATE SUBMISSION =================
-    if (!qSub) {
-      qSub = {
+    // ================= UPDATE SUBMISSION ARRAY =================
+    if (qSubIndex === -1) {
+      // Create new question entry if it doesn't exist
+      submission.submissions.push({
         questionId,
-        attempts: [],
-        finalCode: "",
-        finalVerdict: "PENDING",
-        lastExecutedAt: null,
-      };
-      submission.submissions.push(qSub);
-    }
-
-    qSub.attempts.push(attempt);
-    qSub.lastExecutedAt = new Date();
-
-    // FINAL STATE UPDATE
-    if (verdict === "ACCEPTED") {
-      qSub.finalVerdict = "ACCEPTED";
-      qSub.finalCode = code;
+        attempts: [attempt],
+        finalCode: verdict === "ACCEPTED" ? code : "",
+        finalVerdict: verdict,
+        lastExecutedAt: new Date(),
+      });
     } else {
-      qSub.finalVerdict = verdict;
+      // Update existing entry
+      submission.submissions[qSubIndex].attempts.push(attempt);
+      submission.submissions[qSubIndex].lastExecutedAt = new Date();
+      submission.submissions[qSubIndex].finalVerdict = verdict;
+      
+      if (verdict === "ACCEPTED") {
+        submission.submissions[qSubIndex].finalCode = code;
+      }
     }
 
-    // ================= SCORE RECALC =================
+    // ================= RECALCULATE SCORE & SAVE =================
+    // Filter the updated array for accepted questions
     submission.score = submission.submissions.filter(
       (s) => s.finalVerdict === "ACCEPTED"
     ).length;
 
+    // IMPORTANT: Tell Mongoose the nested array has changed
+    submission.markModified('submissions');
+    
     await submission.save();
 
     return res.json({

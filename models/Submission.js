@@ -36,13 +36,13 @@ const questionSubmissionSchema = new mongoose.Schema(
       required: true,
     },
 
-    // 🔁 ALL ATTEMPTS (history)
+    
     attempts: {
       type: [attemptSchema],
       default: [],
     },
 
-    // 🔒 FINAL STATE (for scoring & reports)
+   
     finalCode: {
       type: String,
       default: "",
@@ -98,13 +98,13 @@ const submissionSchema = new mongoose.Schema(
       default: false,
     },
 
-    // 🔥 PER QUESTION SUBMISSIONS
+    
     submissions: {
       type: [questionSubmissionSchema],
       default: [],
     },
 
-    // 🔢 FINAL SCORE (sirf ACCEPTED count)
+
     score: {
       type: Number,
       default: 0,
@@ -127,14 +127,14 @@ const submissionSchema = new mongoose.Schema(
     },
 
     timeTaken: {
-      type: Number, // seconds
+      type: Number,
       default: 0,
     },
   },
   { timestamps: true }
 );
 
-// ✅ One submission per user per exam
+
 submissionSchema.index({ user: 1, exam: 1 }, { unique: true });
 
 module.exports = mongoose.model("Submission", submissionSchema);
