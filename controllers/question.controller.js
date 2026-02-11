@@ -26,24 +26,25 @@ exports.getQuestions = async (req, res) => {
        - language → ONLY code selection
     ================================================ */
 
-    const questionSet = user.questionSet; // "A" or "B"
+    const questionSet = user.questionSet; // "A" | "B"
     const language = user.language;       // "java" | "python" | "c"
 
     /* ================= FETCH QUESTIONS ================= */
-    const questions = await Question.find({
+    let questions = await Question.find({
       questionSet,
       isActive: true,
     }).lean();
+
+    // 🔀 SHUFFLE QUESTIONS (ANTI-CHEAT)
+    questions = questions.sort(() => Math.random() - 0.5);
 
     /* ================= FORMAT RESPONSE ================= */
     const formattedQuestions = questions
       .map((q) => {
         const langBlock = q.languages?.[language];
 
-        // agar kisi question me us language ka code hi nahi hai
-        if (!langBlock || !langBlock.buggyCode) {
-          return null;
-        }
+        // ❌ Skip if that language not available
+        if (!langBlock || !langBlock.buggyCode) return null;
 
         return {
           _id: q._id,
@@ -63,7 +64,6 @@ exports.getQuestions = async (req, res) => {
       count: formattedQuestions.length,
       questions: formattedQuestions,
     });
-
   } catch (err) {
     console.error("Get Questions Error:", err);
     return res.status(500).json({

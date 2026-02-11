@@ -1,11 +1,16 @@
-const Submission = require("../models/Submission");
 const Exam = require("../models/Exam");
+const Submission = require("../models/Submission");
 
 exports.getLeaderboard = async (req, res) => {
   try {
-    const exam = await Exam.findOne();
+    const exam = await Exam.findOne().sort({ createdAt: -1 });
+
     if (!exam) {
-      return res.status(404).json({ success: false, message: "Exam not found" });
+      return res.json({
+        success: true,
+        leaderboard: [],
+        examStatus: "waiting",
+      });
     }
 
     const adminKey = req.headers["x-admin-key"];
@@ -18,49 +23,61 @@ exports.getLeaderboard = async (req, res) => {
       });
     }
 
-    // Fetch and Sort: Non-DQ first, then highest Score, then lowest Time
-    const leaderboard = await Submission.find({ isSubmitted: true })
+    const submissions = await Submission.find({
+      exam: exam._id,
+      isSubmitted: true,
+    })
       .populate("user", "name college questionSet year")
-      .sort({
-        isDisqualified: 1, 
-        score: -1,         
-        timeTaken: 1,      
+      .lean();
+
+    // 🔒 safety
+    const safe = submissions.filter(s => s.user);
+
+    const valid = safe
+      .filter(s => !s.isDisqualified)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.timeTaken - b.timeTaken;
       });
 
-    let currentRank = 1;
+    const dq = safe.filter(s => s.isDisqualified);
 
-    const result = leaderboard
-      .filter(item => item.user)
-      .map(item => {
-        let rank;
-        if (item.isDisqualified) {
-          rank = "DQ";
-        } else {
-          rank = currentRank;
-          currentRank++;
-        }
+    let rank = 1;
 
-        return {
-          rank,
-          name: item.user.name,
-          college: item.user.college,
-          year: item.user.year,
-          division: item.user.questionSet, // "A" for Juniors, "B" for Seniors
-          score: item.score,
-          timeTaken: item.timeTaken,
-          isDisqualified: item.isDisqualified,
-          reason: item.disqualificationReason,
-        };
-      });
+    const leaderboard = [
+      ...valid.map(s => ({
+        rank: rank++,
+        name: s.user.name,
+        college: s.user.college,
+        year: s.user.year,
+        division: s.user.questionSet,
+        score: s.score,
+        timeTaken: s.timeTaken,
+        isDisqualified: false,
+      })),
+      ...dq.map(s => ({
+        rank: "DQ",
+        name: s.user.name,
+        college: s.user.college,
+        year: s.user.year,
+        division: s.user.questionSet,
+        score: s.score, // ✅ score preserved
+        timeTaken: s.timeTaken,
+        isDisqualified: true,
+        reason: s.disqualificationReason || "Security violation",
+      })),
+    ];
 
     return res.json({
       success: true,
-      leaderboard: result,
+      leaderboard,
       examStatus: exam.status,
     });
-
   } catch (err) {
     console.error("Leaderboard Error:", err);
-    return res.status(500).json({ success: false, message: "Internal server error" });
+    return res.status(500).json({
+      success: false,
+      message: "Leaderboard failed",
+    });
   }
 };
