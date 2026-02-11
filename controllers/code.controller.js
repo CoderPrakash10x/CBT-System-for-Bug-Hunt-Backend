@@ -1,6 +1,7 @@
 const Submission = require("../models/Submission");
 const Question = require("../models/Question");
 const User = require("../models/User");
+const Exam = require("../models/Exam");
 const { submitToJudge0 } = require("../utils/judge0");
 
 const MAX_ATTEMPTS_PER_QUESTION = 5;
@@ -13,8 +14,14 @@ exports.submitCode = async (req, res) => {
       return res.status(400).json({ success: false, message: "Missing fields" });
     }
 
+    const exam = await Exam.findOne().sort({ createdAt: -1 });
+
     const [submission, user] = await Promise.all([
-      Submission.findOne({ user: userId, isSubmitted: false }),
+      Submission.findOne({
+        user: userId,
+        exam: exam._id,
+        isSubmitted: false,
+      }),
       User.findById(userId).select("language"),
     ]);
 
@@ -27,8 +34,11 @@ exports.submitCode = async (req, res) => {
     }
 
     const question = await Question.findById(questionId).lean();
-    const langBlock = question?.languages?.[user.language];
+    if (!question) {
+      return res.status(404).json({ success: false, message: "Question not found" });
+    }
 
+    const langBlock = question.languages?.[user.language];
     if (!langBlock) {
       return res.status(400).json({ success: false, message: "Language not supported" });
     }
@@ -37,17 +47,27 @@ exports.submitCode = async (req, res) => {
       (s) => s.questionId.toString() === questionId
     );
 
-    if (qSubIndex !== -1 && submission.submissions[qSubIndex].finalVerdict === "ACCEPTED") {
-      return res.json({ success: true, verdict: "ACCEPTED", locked: true, score: submission.score });
+    if (
+      qSubIndex !== -1 &&
+      submission.submissions[qSubIndex].finalVerdict === "ACCEPTED"
+    ) {
+      return res.json({
+        success: true,
+        verdict: "ACCEPTED",
+        locked: true,
+        score: submission.score,
+      });
     }
 
-    // Attempt Limit Check
-    if (qSubIndex !== -1 && submission.submissions[qSubIndex].attempts.length >= MAX_ATTEMPTS_PER_QUESTION) {
+    if (
+      qSubIndex !== -1 &&
+      submission.submissions[qSubIndex].attempts.length >= MAX_ATTEMPTS_PER_QUESTION
+    ) {
       return res.status(429).json({ success: false, message: "Max attempts reached" });
     }
 
-    // Execution Logic
     let verdict = "ACCEPTED";
+
     for (const tc of langBlock.testCases) {
       const result = await submitToJudge0({
         sourceCode: code,
@@ -57,7 +77,7 @@ exports.submitCode = async (req, res) => {
       });
 
       const statusId = result?.status?.id;
-      if (statusId === 3) continue; 
+      if (statusId === 3) continue;
 
       if (statusId === 6) verdict = "COMPILE_ERROR";
       else if (statusId === 5) verdict = "TIME_LIMIT_EXCEEDED";
@@ -68,7 +88,6 @@ exports.submitCode = async (req, res) => {
 
     const attempt = { code, verdict, executedAt: new Date() };
 
-    // Update Submissions Array
     if (qSubIndex === -1) {
       submission.submissions.push({
         questionId,
@@ -86,12 +105,10 @@ exports.submitCode = async (req, res) => {
       }
     }
 
-    // 🔥 FIX: Recalculate Score with Case Insensitivity
     submission.score = submission.submissions.filter(
       (s) => s.finalVerdict && s.finalVerdict.toUpperCase() === "ACCEPTED"
     ).length;
 
-    // 🔥 CRITICAL: Tell Mongoose that the array has changed
     submission.markModified("submissions");
     await submission.save();
 
