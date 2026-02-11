@@ -144,7 +144,8 @@ exports.updateTabCount = async (req, res) => {
 /* ================== SUBMIT EXAM ================== */
 exports.submitExam = async (req, res) => {
   try {
-    const { userId } = req.body;
+    const { userId, reason } = req.body;
+
     const exam = await getCurrentExam();
 
     const submission = await Submission.findOne({
@@ -153,28 +154,54 @@ exports.submitExam = async (req, res) => {
       isSubmitted: false,
     });
 
+    // 🔒 already submitted → safe exit
     if (!submission) {
       return res.json({ success: true });
     }
 
     submission.isSubmitted = true;
     submission.submittedAt = new Date();
-    submission.timeTaken = Math.floor(
-      (submission.submittedAt - submission.startedAt) / 1000
-    );
 
-    // ✅ FINAL SCORE (DQ DOES NOT ERASE PERFORMANCE)
+    /* ================= DQ SYNC (FINAL FIX) ================= */
+    if (reason === "disqualified" || submission.isDisqualified) {
+      submission.isDisqualified = true;
+      submission.disqualificationReason =
+        submission.disqualificationReason || "Security violation";
+    }
+
+    /* ================= TIME TAKEN (SINGLE SOURCE OF TRUTH) ================= */
+    if (exam.startTime) {
+      submission.timeTaken = Math.max(
+        Math.floor(
+          (submission.submittedAt.getTime() -
+            new Date(exam.startTime).getTime()) / 1000
+        ),
+        0
+      );
+    } else {
+      submission.timeTaken = 0;
+    }
+
+    /* ================= SCORE (DQ DOES NOT WIPE SCORE) ================= */
     submission.score = submission.submissions.filter(
-      (s) => s.finalVerdict && s.finalVerdict.toUpperCase() === "ACCEPTED"
+      (s) =>
+        s.finalVerdict &&
+        s.finalVerdict.toUpperCase() === "ACCEPTED"
     ).length;
 
     await submission.save();
-    res.json({ success: true, score: submission.score });
+
+    return res.json({
+      success: true,
+      score: submission.score,
+      isDisqualified: submission.isDisqualified,
+    });
   } catch (err) {
     console.error("submitExam error:", err);
-    res.status(500).json({ success: false });
+    return res.status(500).json({ success: false });
   }
 };
+
 
 /* ================== LEADERBOARD ================== */
 exports.getLeaderboard = async (req, res) => {
