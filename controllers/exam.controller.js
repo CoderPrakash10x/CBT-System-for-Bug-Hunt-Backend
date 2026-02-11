@@ -51,7 +51,6 @@ exports.endExam = async (req, res) => {
     exam.endTime = new Date();
     await exam.save();
 
-    // ✅ EXAM SCOPED AUTO SUBMIT
     await Submission.updateMany(
       { exam: exam._id, isSubmitted: false },
       {
@@ -160,13 +159,14 @@ exports.submitExam = async (req, res) => {
 
     submission.isSubmitted = true;
     submission.submittedAt = new Date();
-    submission.timeTaken = Math.floor((submission.submittedAt - submission.startedAt) / 1000);
+    submission.timeTaken = Math.floor(
+      (submission.submittedAt - submission.startedAt) / 1000
+    );
 
-    // 🔥 FIX: Robust Score calculation during final submit
+    // ✅ FINAL SCORE (DQ DOES NOT ERASE PERFORMANCE)
     submission.score = submission.submissions.filter(
       (s) => s.finalVerdict && s.finalVerdict.toUpperCase() === "ACCEPTED"
     ).length;
-
 
     await submission.save();
     res.json({ success: true, score: submission.score });
@@ -180,8 +180,6 @@ exports.submitExam = async (req, res) => {
 exports.getLeaderboard = async (req, res) => {
   try {
     const exam = await Exam.findOne().sort({ createdAt: -1 });
-
-    // ✅ HARD GUARD
     if (!exam) {
       return res.json({
         success: true,
@@ -194,29 +192,24 @@ exports.getLeaderboard = async (req, res) => {
       exam: exam._id,
       isSubmitted: true,
     })
-      .populate({
-        path: "user",
-        select: "name college questionSet year",
-        options: { strictPopulate: false },
-      })
+      .populate("user", "name college questionSet year")
       .lean();
 
-    // ✅ FILTER NULL USERS (CRITICAL)
-    const safe = submissions.filter(s => s.user);
+    const safe = submissions.filter((s) => s.user);
 
     const valid = safe
-      .filter(s => !s.isDisqualified)
+      .filter((s) => !s.isDisqualified)
       .sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
         return a.timeTaken - b.timeTaken;
       });
 
-    const dq = safe.filter(s => s.isDisqualified);
+    const dq = safe.filter((s) => s.isDisqualified);
 
     let rank = 1;
 
     const leaderboard = [
-      ...valid.map(s => ({
+      ...valid.map((s) => ({
         rank: rank++,
         name: s.user.name,
         college: s.user.college,
@@ -226,7 +219,7 @@ exports.getLeaderboard = async (req, res) => {
         timeTaken: s.timeTaken,
         isDisqualified: false,
       })),
-      ...dq.map(s => ({
+      ...dq.map((s) => ({
         rank: "DQ",
         name: s.user.name,
         college: s.user.college,
@@ -244,16 +237,11 @@ exports.getLeaderboard = async (req, res) => {
       leaderboard,
       examStatus: exam.status,
     });
-
   } catch (err) {
-    console.error("🔥 LEADERBOARD CRASH:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Leaderboard failed",
-    });
+    console.error("Leaderboard crash:", err);
+    return res.status(500).json({ success: false });
   }
 };
-
 
 /* ================== RESET ================== */
 exports.resetEvent = async (req, res) => {

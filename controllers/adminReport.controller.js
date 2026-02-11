@@ -4,17 +4,14 @@ const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
-/* ======================================================
-   🔍 GET SINGLE USER FULL REPORT (JSON)
-====================================================== */
+/* ================= USER FULL REPORT ================= */
 exports.getUserReport = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // ✅ ALWAYS latest exam
     const exam = await Exam.findOne().sort({ createdAt: -1 });
     if (!exam) {
-      return res.status(404).json({ success: false, message: "Exam not found" });
+      return res.status(404).json({ success: false });
     }
 
     const submission = await Submission.findOne({
@@ -25,33 +22,20 @@ exports.getUserReport = async (req, res) => {
       .populate("submissions.questionId");
 
     if (!submission) {
-      return res.status(404).json({
-        success: false,
-        message: "Submission not found",
-      });
+      return res.status(404).json({ success: false });
     }
 
     const report = {
-      user: {
-        name: submission.user.name,
-        email: submission.user.email,
-        college: submission.user.college,
-        year: submission.user.year,
-        language: submission.user.language,
-      },
+      user: submission.user,
       score: submission.score,
       timeTaken: submission.timeTaken,
       isDisqualified: submission.isDisqualified,
       reason: submission.disqualificationReason,
-
-      // 🔥 NO QUESTION DROPPING
       questions: submission.submissions.map((qSub, idx) => {
         const q = qSub.questionId;
-
         return {
           questionCode: q?.questionCode || `Q-${idx + 1}`,
-          problemStatement:
-            q?.problemStatement || "Question data unavailable",
+          problemStatement: q?.problemStatement || "",
           buggyCode:
             q?.languages?.[submission.user.language]?.buggyCode || "",
           finalVerdict: qSub.finalVerdict,
@@ -59,35 +43,24 @@ exports.getUserReport = async (req, res) => {
           attempts: qSub.attempts.map((a, i) => ({
             attemptNo: i + 1,
             verdict: a.verdict,
-            executedAt: a.executedAt,
             code: a.code,
           })),
         };
       }),
     };
 
-    return res.json({
-      success: true,
-      report,
-    });
+    res.json({ success: true, report });
   } catch (err) {
-    console.error("Admin Report Error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to generate report",
-    });
+    console.error("Report error:", err);
+    res.status(500).json({ success: false });
   }
 };
 
-/* ======================================================
-   📊 ALL SUBMISSIONS SUMMARY
-====================================================== */
+/* ================= ALL SUBMISSIONS ================= */
 exports.getAllSubmissionsSummary = async (req, res) => {
   try {
     const exam = await Exam.findOne().sort({ createdAt: -1 });
-    if (!exam) {
-      return res.json({ success: true, submissions: [] });
-    }
+    if (!exam) return res.json({ success: true, submissions: [] });
 
     const submissions = await Submission.find({ exam: exam._id })
       .populate("user", "name college email")
@@ -106,22 +79,13 @@ exports.getAllSubmissionsSummary = async (req, res) => {
         tabSwitchCount: s.tabSwitchCount,
       }));
 
-    return res.json({
-      success: true,
-      submissions: summary,
-    });
-  } catch (err) {
-    console.error("Admin Summary Error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch submissions",
-    });
+    res.json({ success: true, submissions: summary });
+  } catch {
+    res.status(500).json({ success: false });
   }
 };
 
-/* ======================================================
-   📥 DOWNLOAD USER PDF REPORT
-====================================================== */
+/* ================= PDF REPORT ================= */
 exports.downloadUserReport = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -136,36 +100,15 @@ exports.downloadUserReport = async (req, res) => {
       .populate("user", "name email college year language")
       .populate("submissions.questionId");
 
-    if (!submission) {
-      return res.status(404).json({ success: false });
-    }
+    if (!submission) return res.status(404).json({ success: false });
 
     const report = {
-      user: {
-        name: submission.user.name,
-        email: submission.user.email,
-        college: submission.user.college,
-        language: submission.user.language,
-      },
+      user: submission.user,
       score: submission.score,
       timeTaken: submission.timeTaken,
       isDisqualified: submission.isDisqualified,
       reason: submission.disqualificationReason,
-      questions: submission.submissions.map((qs, idx) => {
-        const q = qs.questionId;
-        return {
-          questionCode: q?.questionCode || `Q-${idx + 1}`,
-          problemStatement:
-            q?.problemStatement || "Question data unavailable",
-          buggyCode:
-            q?.languages?.[submission.user.language]?.buggyCode || "",
-          attempts: qs.attempts.map((a, i) => ({
-            attemptNo: i + 1,
-            verdict: a.verdict,
-            code: a.code,
-          })),
-        };
-      }),
+      questions: submission.submissions,
     };
 
     const fileName = `BugHunt_${submission.user._id}_${Date.now()}.pdf`;
@@ -184,8 +127,7 @@ exports.downloadUserReport = async (req, res) => {
         fs.unlink(filePath, () => {});
       });
     });
-  } catch (err) {
-    console.error("PDF Error:", err);
+  } catch {
     res.status(500).json({ success: false });
   }
 };
