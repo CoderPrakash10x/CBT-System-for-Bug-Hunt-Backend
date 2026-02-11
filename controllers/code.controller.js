@@ -22,25 +22,45 @@ exports.submitCode = async (req, res) => {
         exam: exam._id,
         isSubmitted: false,
       }),
-      User.findById(userId).select("language"),
+      User.findById(userId).select("language questionSet"),
     ]);
 
     if (!submission || !user) {
-      return res.status(403).json({ success: false, message: "Exam session not active" });
+      return res.status(403).json({
+        success: false,
+        message: "Exam session not active",
+      });
     }
 
     if (submission.isDisqualified) {
-      return res.status(403).json({ success: false, message: "User is disqualified" });
+      return res.status(403).json({
+        success: false,
+        message: "User is disqualified",
+      });
     }
 
     const question = await Question.findById(questionId).lean();
     if (!question) {
-      return res.status(404).json({ success: false, message: "Question not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Question not found",
+      });
+    }
+
+    // 🔥 QuestionSet enforcement
+    if (question.questionSet !== user.questionSet) {
+      return res.status(403).json({
+        success: false,
+        message: "Question not allowed for this user",
+      });
     }
 
     const langBlock = question.languages?.[user.language];
     if (!langBlock) {
-      return res.status(400).json({ success: false, message: "Language not supported" });
+      return res.status(400).json({
+        success: false,
+        message: "Language not supported",
+      });
     }
 
     const qSubIndex = submission.submissions.findIndex(
@@ -63,14 +83,31 @@ exports.submitCode = async (req, res) => {
       qSubIndex !== -1 &&
       submission.submissions[qSubIndex].attempts.length >= MAX_ATTEMPTS_PER_QUESTION
     ) {
-      return res.status(429).json({ success: false, message: "Max attempts reached" });
+      return res.status(429).json({
+        success: false,
+        message: "Max attempts reached",
+      });
     }
+
+    /* ===================== 🔥 MAIN FIX HERE 🔥 ===================== */
+
+    // 👉 FINAL SOURCE CODE (wrapper + user code)
+    let finalSourceCode = code;
+
+    if (langBlock.wrapperCode) {
+      finalSourceCode = langBlock.wrapperCode.replace(
+        "__USER_CODE__",
+        code
+      );
+    }
+
+    /* =============================================================== */
 
     let verdict = "ACCEPTED";
 
     for (const tc of langBlock.testCases) {
       const result = await submitToJudge0({
-        sourceCode: code,
+        sourceCode: finalSourceCode,   // ✅ FIXED LINE
         language: user.language,
         stdin: tc.input,
         expectedOutput: tc.output,
@@ -115,6 +152,9 @@ exports.submitCode = async (req, res) => {
     return res.json({ success: true, verdict, score: submission.score });
   } catch (err) {
     console.error("Code Execution Error:", err);
-    return res.status(500).json({ success: false, message: "Execution failed" });
+    return res.status(500).json({
+      success: false,
+      message: "Execution failed",
+    });
   }
 };

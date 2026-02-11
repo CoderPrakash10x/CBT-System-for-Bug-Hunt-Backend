@@ -8,6 +8,11 @@ const languageBlockSchema = new mongoose.Schema(
       required: true,
     },
 
+    wrapperCode: {
+      type: String,
+      required: false, // backward compatible
+    },
+    
     // 🔒 Hidden test cases (Judge0 ke liye)
     testCases: [
       {
