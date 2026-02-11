@@ -10,9 +10,9 @@ const languageBlockSchema = new mongoose.Schema(
 
     wrapperCode: {
       type: String,
-      required: false, // backward compatible
+      default: "",   // ✅ SAFE fallback
     },
-    
+
     // 🔒 Hidden test cases (Judge0 ke liye)
     testCases: [
       {

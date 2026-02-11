@@ -21,30 +21,33 @@ exports.getQuestions = async (req, res) => {
       });
     }
 
-    /* ================= FINAL RULE =================
-       - questionSet → ONLY year based
-       - language → ONLY code selection
-    ================================================ */
-
-    const questionSet = user.questionSet; // "A" | "B"
-    const language = user.language;       // "java" | "python" | "c"
+    /* ================= FINAL RULE ================= */
+    const questionSet = user.questionSet;          // "A" | "B"
+    const language = user.language?.toLowerCase(); // 🔥 FIX
 
     /* ================= FETCH QUESTIONS ================= */
-    let questions = await Question.find({
+    const rawQuestions = await Question.find({
       questionSet,
       isActive: true,
     }).lean();
 
-    // 🔀 SHUFFLE QUESTIONS (ANTI-CHEAT)
-    questions = questions.sort(() => Math.random() - 0.5);
+    console.log("RAW QUESTIONS:", rawQuestions.length);
+
+    // 🔀 SHUFFLE (ANTI-CHEAT)
+    const shuffled = rawQuestions.sort(() => Math.random() - 0.5);
 
     /* ================= FORMAT RESPONSE ================= */
-    const formattedQuestions = questions
+    const formattedQuestions = shuffled
       .map((q) => {
         const langBlock = q.languages?.[language];
 
-        // ❌ Skip if that language not available
-        if (!langBlock || !langBlock.buggyCode) return null;
+        // ❌ Skip if language missing or buggyCode empty
+        if (!langBlock || !langBlock.buggyCode) {
+          console.log(
+            `SKIPPED QUESTION ${q.questionCode} | language=${language}`
+          );
+          return null;
+        }
 
         return {
           _id: q._id,
@@ -57,6 +60,8 @@ exports.getQuestions = async (req, res) => {
         };
       })
       .filter(Boolean);
+
+    console.log("QUESTIONS SENT:", formattedQuestions.length);
 
     /* ================= FINAL RESPONSE ================= */
     return res.json({
