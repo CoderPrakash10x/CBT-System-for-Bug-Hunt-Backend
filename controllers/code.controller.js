@@ -6,123 +6,95 @@ const { submitToJudge0 } = require("../utils/judge0");
 
 const MAX_ATTEMPTS_PER_QUESTION = 5;
 
+// 🔥 ROBUST OUTPUT NORMALIZER (Fixes extra newlines/spaces)
+const normalize = (str) =>
+  (str || "").toString().replace(/[\r\n]+/g, " ").trim().replace(/\s+/g, " ");
+
 exports.submitCode = async (req, res) => {
   try {
     const { userId, questionId, code } = req.body;
 
-    if (!userId || !questionId || !code) {
-      return res.status(400).json({ success: false, message: "Missing fields" });
+    // 🔒 GUARD: Check inputs
+    if (!userId || !questionId || !code || code.trim().length < 5) {
+      return res.status(400).json({ success: false, message: "Code too short or missing fields" });
     }
 
     const exam = await Exam.findOne().sort({ createdAt: -1 });
+    if (!exam) return res.status(404).json({ success: false, message: "No active exam found" });
 
     const [submission, user] = await Promise.all([
-      Submission.findOne({
-        user: userId,
-        exam: exam._id,
-        isSubmitted: false,
-      }),
+      Submission.findOne({ user: userId, exam: exam._id, isSubmitted: false }),
       User.findById(userId).select("language questionSet"),
     ]);
 
     if (!submission || !user) {
-      return res.status(403).json({
-        success: false,
-        message: "Exam session not active",
-      });
+      return res.status(403).json({ success: false, message: "Exam session not active or user not found" });
     }
 
     if (submission.isDisqualified) {
-      return res.status(403).json({
-        success: false,
-        message: "User is disqualified",
-      });
+      return res.status(403).json({ success: false, message: "User is disqualified" });
     }
 
     const question = await Question.findById(questionId).lean();
-    if (!question) {
-      return res.status(404).json({
-        success: false,
-        message: "Question not found",
-      });
+    const langBlock = question?.languages?.[user.language];
+
+    if (!question || !langBlock) {
+      return res.status(404).json({ success: false, message: "Question/Language not supported" });
     }
 
-    // 🔥 QuestionSet enforcement
-    if (question.questionSet !== user.questionSet) {
-      return res.status(403).json({
-        success: false,
-        message: "Question not allowed for this user",
-      });
+    // 🔒 GUARD: Check for no changes
+    if (code.trim() === langBlock.buggyCode.trim()) {
+      return res.status(409).json({ success: false, message: "No changes made to code" });
     }
 
-    const langBlock = question.languages?.[user.language];
-    if (!langBlock) {
-      return res.status(400).json({
-        success: false,
-        message: "Language not supported",
-      });
+    const qSubIndex = submission.submissions.findIndex(s => s.questionId.toString() === questionId);
+
+    // 🔒 GUARD: Already accepted?
+    if (qSubIndex !== -1 && submission.submissions[qSubIndex].finalVerdict === "ACCEPTED") {
+      return res.json({ success: true, verdict: "ACCEPTED", locked: true, score: submission.score });
     }
 
-    const qSubIndex = submission.submissions.findIndex(
-      (s) => s.questionId.toString() === questionId
-    );
-
-    if (
-      qSubIndex !== -1 &&
-      submission.submissions[qSubIndex].finalVerdict === "ACCEPTED"
-    ) {
-      return res.json({
-        success: true,
-        verdict: "ACCEPTED",
-        locked: true,
-        score: submission.score,
-      });
+    // 🔒 GUARD: Max attempts
+    if (qSubIndex !== -1 && submission.submissions[qSubIndex].attempts.length >= MAX_ATTEMPTS_PER_QUESTION) {
+      return res.status(429).json({ success: false, message: "Max attempts reached" });
     }
 
-    if (
-      qSubIndex !== -1 &&
-      submission.submissions[qSubIndex].attempts.length >= MAX_ATTEMPTS_PER_QUESTION
-    ) {
-      return res.status(429).json({
-        success: false,
-        message: "Max attempts reached",
-      });
-    }
-
-    /* ===================== 🔥 MAIN FIX HERE 🔥 ===================== */
-
-    // 👉 FINAL SOURCE CODE (wrapper + user code)
-    let finalSourceCode = code;
-
-    if (langBlock.wrapperCode) {
-      finalSourceCode = langBlock.wrapperCode.replace(
-        "__USER_CODE__",
-        code
-      );
-    }
-
-    /* =============================================================== */
+    /* ===================== JUDGE0 EXECUTION ===================== */
+    let finalSourceCode = langBlock.wrapperCode 
+      ? langBlock.wrapperCode.replace("__USER_CODE__", code) 
+      : code;
 
     let verdict = "ACCEPTED";
 
     for (const tc of langBlock.testCases) {
       const result = await submitToJudge0({
-        sourceCode: finalSourceCode,   // ✅ FIXED LINE
+        sourceCode: finalSourceCode,
         language: user.language,
         stdin: tc.input,
         expectedOutput: tc.output,
       });
 
       const statusId = result?.status?.id;
-      if (statusId === 3) continue;
 
-      if (statusId === 6) verdict = "COMPILE_ERROR";
-      else if (statusId === 5) verdict = "TIME_LIMIT_EXCEEDED";
-      else if (statusId >= 7 && statusId <= 12) verdict = "RUNTIME_ERROR";
-      else verdict = "WRONG_ANSWER";
-      break;
+      if (statusId !== 3) { // 3 = Accepted in Judge0
+        if (statusId === 4) verdict = "WRONG_ANSWER";
+        else if (statusId === 5) verdict = "TIME_LIMIT_EXCEEDED";
+        else if (statusId === 6) verdict = "COMPILE_ERROR";
+        else verdict = "RUNTIME_ERROR";
+        break;
+      }
+
+      // 🔥 Final Output Comparison
+      const actual = normalize(result.stdout);
+      const expected = normalize(tc.output);
+
+      if (actual !== expected) {
+        verdict = "WRONG_ANSWER";
+        break;
+      }
     }
 
+    /* ===================== UPDATE DATABASE ===================== */
     const attempt = { code, verdict, executedAt: new Date() };
 
     if (qSubIndex === -1) {
@@ -142,19 +114,16 @@ exports.submitCode = async (req, res) => {
       }
     }
 
-    submission.score = submission.submissions.filter(
-      (s) => s.finalVerdict && s.finalVerdict.toUpperCase() === "ACCEPTED"
-    ).length;
-
+    // Recalculate Score
+    submission.score = submission.submissions.filter(s => s.finalVerdict === "ACCEPTED").length;
+    
     submission.markModified("submissions");
-    await submission.save();
+    await submission.save(); // Leaderboard logic relies on this being saved first!
 
     return res.json({ success: true, verdict, score: submission.score });
+
   } catch (err) {
     console.error("Code Execution Error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Execution failed",
-    });
+    return res.status(500).json({ success: false, message: "Execution failed" });
   }
 };

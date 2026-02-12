@@ -6,16 +6,13 @@ exports.getLeaderboard = async (req, res) => {
     const exam = await Exam.findOne().sort({ createdAt: -1 });
 
     if (!exam) {
-      return res.json({
-        success: true,
-        leaderboard: [],
-        examStatus: "waiting",
-      });
+      return res.json({ success: true, leaderboard: [], examStatus: "waiting" });
     }
 
     const adminKey = req.headers["x-admin-key"];
     const isAdmin = adminKey && adminKey === process.env.ADMIN_KEY;
 
+    // 🔒 Security: Agar exam live hai toh sirf admin dekh paye, users ko "ended" ke baad dikhe
     if (!isAdmin && exam.status !== "ended") {
       return res.status(403).json({
         success: false,
@@ -23,61 +20,60 @@ exports.getLeaderboard = async (req, res) => {
       });
     }
 
-    const submissions = await Submission.find({
-      exam: exam._id,
-      isSubmitted: true,
-    })
+    // 🔥 FIX: Sirf unhe dikhao jinka user object valid ho
+    // .lean() use karne se speed badhti hai
+    const submissions = await Submission.find({ exam: exam._id })
       .populate("user", "name college questionSet year")
       .lean();
 
-    // 🔒 safety
-    const safe = submissions.filter(s => s.user);
+    // 🔒 Filter out submissions without a valid user (Safety check)
+    const activeSubmissions = submissions.filter(s => s.user);
 
-    const valid = safe
+    // 1️⃣ Valid (Non-Disqualified) Students: Sorting Logic (Score high -> Time low)
+    const valid = activeSubmissions
       .filter(s => !s.isDisqualified)
       .sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
-        return a.timeTaken - b.timeTaken;
+        return (a.timeTaken || 0) - (b.timeTaken || 0); // Less time is better
       });
 
-    const dq = safe.filter(s => s.isDisqualified);
+    // 2️⃣ Disqualified Students
+    const dq = activeSubmissions.filter(s => s.isDisqualified);
 
     let rank = 1;
 
-    const leaderboard = [
-      ...valid.map(s => ({
-        rank: rank++,
-        name: s.user.name,
-        college: s.user.college,
-        year: s.user.year,
-        division: s.user.questionSet,
-        score: s.score,
-        timeTaken: s.timeTaken,
-        isDisqualified: false,
-      })),
-      ...dq.map(s => ({
-        rank: "DQ",
-        name: s.user.name,
-        college: s.user.college,
-        year: s.user.year,
-        division: s.user.questionSet,
-        score: s.score, // ✅ score preserved
-        timeTaken: s.timeTaken,
-        isDisqualified: true,
-        reason: s.disqualificationReason || "Security violation",
-      })),
-    ];
+    // 3️⃣ Final Map with Rank
+    const rankedValid = valid.map(s => ({
+      rank: rank++,
+      name: s.user.name,
+      college: s.user.college,
+      year: s.user.year,
+      division: s.user.questionSet,
+      score: s.score || 0,
+      timeTaken: s.timeTaken || 0,
+      isDisqualified: false,
+      isSubmitted: s.isSubmitted // Helpful to see live status for Admin
+    }));
+
+    const rankedDQ = dq.map(s => ({
+      rank: "DQ",
+      name: s.user.name,
+      college: s.user.college,
+      year: s.user.year,
+      division: s.user.questionSet,
+      score: s.score || 0,
+      timeTaken: s.timeTaken || 0,
+      isDisqualified: true,
+      reason: s.disqualificationReason || "Security violation",
+    }));
 
     return res.json({
       success: true,
-      leaderboard,
+      leaderboard: [...rankedValid, ...rankedDQ],
       examStatus: exam.status,
     });
   } catch (err) {
     console.error("Leaderboard Error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Leaderboard failed",
-    });
+    return res.status(500).json({ success: false, message: "Leaderboard failed" });
   }
 };

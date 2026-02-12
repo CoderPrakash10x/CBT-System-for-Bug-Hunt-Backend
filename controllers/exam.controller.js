@@ -7,7 +7,7 @@ const getCurrentExam = async () => {
   if (!exam) {
     exam = await Exam.create({
       status: "waiting",
-      duration: 10,
+      duration: 90,
     });
   }
   return exam;
@@ -185,9 +185,11 @@ exports.submitExam = async (req, res) => {
     /* ================= SCORE (DQ DOES NOT WIPE SCORE) ================= */
     submission.score = submission.submissions.filter(
       (s) =>
-        s.finalVerdict &&
-        s.finalVerdict.toUpperCase() === "ACCEPTED"
+        s.finalVerdict === "ACCEPTED" &&
+        s.attempts &&
+        s.attempts.length > 0
     ).length;
+
 
     await submission.save();
 
